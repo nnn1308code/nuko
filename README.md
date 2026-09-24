@@ -44,7 +44,7 @@ sudo systemctl stop power-profiles-daemon.service
 ### 4. プログラムを実行可能にする
 スクリプトに実行権限を付与します。
 ```bash
-chmod +x testA.py
+chmod +x auto_energy_saving_ubuntu.py
 ```
 
 ---
@@ -56,7 +56,7 @@ chmod +x testA.py
 ### 🔹 パターンA：通常実行（ローカルモード）
 実機の前に座って直接操作・実行する場合に使用します。
 ```bash
-python3 testA.py
+python3 auto_energy_saving_ubuntu.py
 ```
 * **挙動:** 一定時間放置すると画面が自動的に暗くなり（最低輝度を0に設定している場合は真っ暗になります）、CPUも省電力モードに入ります。
 * **復帰の挙動:** 実機でキーボードやマウスなどの操作（User active）を検知すると、**画面の明るさもCPUのプロファイルも自動で元の状態（バランスなど）に復帰**します。
@@ -65,9 +65,9 @@ python3 testA.py
 ### 🔹 パターンB：リモートモード実行（`-r` / `--remote`）
 遠隔（リモート）からRDPやVNC などで画面共有して作業を行う場合に使用します。
 ```bash
-python3 testA.py -r
+python3 auto_energy_saving_ubuntu.py -r
 # または
-python3 testA.py --remote
+python3 auto_energy_saving_ubuntu.py --remote
 ```
 * **挙動:** リモートから操作している間、**ローカル（実機）側の画面の明るさは全く必要がないため、完全に暗く（輝度ゼロの真っ暗に）したままの状態をキープ**できます。
 * **リモート側への影響:** ローカル画面が暗いままであっても、**リモート側のPC画面（手元のクライアント表示）は明るいまま**で、通常通り何の影響もなく快適に操作を継続できます。自動画面ブランクのようにマシンがロックされてリモート接続が切れることもありません。（※結果論として、オフィスや自宅に置いている実機画面を第三者に覗き見られるのを防ぐ効果もあります）
