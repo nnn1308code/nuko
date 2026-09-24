@@ -1,87 +1,110 @@
+# Remote Work Screen Brightness & CPU Profile Control Tool
 
-#  リモートワーク用 画面輝度・CPUプロファイル連動制御ツール
-*  auto_energy_saving_ubuntu.py
+- `auto_energy_saving_ubuntu.py`
 
-## 📌 開発の背景（解決する問題）
-Ubuntuの標準設定（設定 > 電源管理 > その右側の 省電力）にある「自動画面ブランク」**を「3分」や「5分」に設定して有効化すると、画面が暗くなると同時に**システムが自動的にロック（サスペンド状態）されてしまうという問題があります。
+## 📌 Background (Problem Solved)
 
-システムがロックされると、**リモートアクセスが切断され、外部からの操作が一切できなくなる**という重大な障害が発生します。
+When Ubuntu's standard setting **Settings > Power > Automatic Screen Blank** is enabled and configured to **3 minutes** or **5 minutes**, the screen becomes dim and the system may automatically lock at the same time.
 
-本プログラムは、この「自動画面ブランクによる意図しないシステムロックとリモート切断」を完全に回避するために開発されました。
+Once the system is locked, a remote connection is disconnected and it becomes impossible to operate the machine remotely. This can cause a serious problem when the computer is being used for remote access.
 
-### ⚙️ 技術的な設計のポイント
-* **ディスプレイサーバー（Wayland / X11）への依存を排除**
-  従来の画面制御ツールはWayland環境やX11環境のどちらか片方でしか動かない問題がありましたが、本プログラムはどちらの環境であっても意識せず、共通して正常に動作する仕様になっています。
-* **一般ユーザー権限での安全な実行**
-  LinuxでCPUの省電力プロファイル（EPP）を書き換えるには通常管理者権限（root権限）が必要ですが、プログラム全体を `sudo` で動かすとPython環境が破損するリスクがあります。そのため、**「プログラム自体は一般ユーザー権限のまま安全に動かし、CPU設定の対象ファイルにだけピンポイントで書き込み権限を付与する」**という安全なアプローチを採用しています。
+This program was developed to completely avoid the **unintended system lock and remote disconnection caused by automatic screen blanking**.
+
+### ⚙️ Technical Design Highlights
+
+* **No dependency on the display server (Wayland / X11)**  
+  Traditional screen-control tools often work only in either Wayland or X11 environments. This program is designed to work normally in both environments without requiring the user to care which display server is in use.
+
+* **Safe operation with normal user privileges**  
+  Normally, modifying the CPU power-saving profile (EPP) on Linux requires administrator (root) privileges. Running the entire program with `sudo`, however, can create risks for the Python environment. Therefore, this program uses a safer approach: **the program itself continues to run as a normal user, while write permission is granted only to the specific CPU configuration files that need to be modified.**
 
 ---
 
-## 🛠️ 動かす前の事前設定（初回のみ）
+## 🛠️ Initial Setup (First Time Only)
 
-一般ユーザー権限のままプログラムを実行・適用できるようにするため、以下の手順で権限付与と競合デーモンの停止を行います。
+To allow the program to run and apply its settings as a normal user, grant the required permission and stop the conflicting power-management daemon as follows.
 
-### 1. 権限付与の設定ファイルを作成
-以下のコマンドを実行し、一般ユーザーからでもCPUのEPP設定ファイルを書き換えられるように権限（`0666`）を付与する設定ファイルを作成します。
+### 1. Create the Permission Configuration File
+
+Run the following command to create a configuration file that grants normal users permission to modify the CPU EPP configuration files (`0666`):
+
 ```bash
 sudo tee /etc/tmpfiles.d/cpu-epp-permissions.conf <<'EOF'
 m /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference 0666 root root - -
 EOF
 ```
 
-### 2. 設定を今すぐシステムに反映
-作成した設定ファイルを、再起動を待たずに今すぐシステムに適用します。
+### 2. Apply the Configuration Immediately
+
+Apply the newly created configuration to the system immediately without waiting for a reboot:
+
 ```bash
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cpu-epp-permissions.conf
 ```
 
-### 3. 競合する標準デーモンを一時停止
-Ubuntuなどで標準で動いている電力管理デーモン（`power-profiles-daemon`）が動作していると、本プログラムによる設定を自動で上書きして妨害してしまうため、一時的に停止します。
+### 3. Temporarily Stop the Conflicting Standard Daemon
+
+If Ubuntu's standard power-management daemon, `power-profiles-daemon`, is running, it may automatically overwrite the settings made by this program and interfere with its operation. Temporarily stop it:
+
 ```bash
 sudo systemctl stop power-profiles-daemon.service
 ```
 
-### 4. プログラムを実行可能にする
-スクリプトに実行権限を付与します。
+### 4. Make the Program Executable
+
+Grant execute permission to the script:
+
 ```bash
 chmod +x auto_energy_saving_ubuntu.py
 ```
 
 ---
 
-## 🚀 実行方法とオプションの挙動
+## 🚀 How to Run and Use the Options
 
-作業を行う環境（ローカルの実機を直接操作するか、リモートから接続して操作するか）に応じてオプションを使い分けます。
+Choose the appropriate option depending on how you are working: whether you are operating the physical machine directly or connecting to it remotely.
 
-### 🔹 パターンA：通常実行（ローカルモード）
-実機の前に座って直接操作・実行する場合に使用します。
+### 🔹 Pattern A: Normal Execution (Local Mode)
+
+Use this mode when you are sitting in front of the physical machine and operating it directly.
+
 ```bash
 python3 auto_energy_saving_ubuntu.py
 ```
-* **挙動:** 一定時間放置すると画面が自動的に暗くなり（最低輝度を0に設定している場合は真っ暗になります）、CPUも省電力モードに入ります。
-* **復帰の挙動:** 実機でキーボードやマウスなどの操作（User active）を検知すると、**画面の明るさもCPUのプロファイルも自動で元の状態（バランスなど）に復帰**します。
-* **停止方法:** 終了したい場合は、ターミナルで **`Ctrl + C`** を押してプログラムを停止してください。
 
-### 🔹 パターンB：リモートモード実行（`-r` / `--remote`）
-遠隔（リモート）からRDPやVNC などで画面共有して作業を行う場合に使用します。
+* **Behavior:** After the specified period of inactivity, the screen automatically becomes dim (or completely black if the minimum brightness is set to 0), and the CPU enters power-saving mode.
+* **Recovery behavior:** When keyboard, mouse, or other local interaction (**User active**) is detected, both the screen brightness and CPU profile automatically return to their previous states (such as balanced mode).
+* **How to stop:** Press `Ctrl + C` in the terminal to stop the program.
+
+### 🔹 Pattern B: Remote Mode (`-r` / `--remote`)
+
+Use this mode when working through a remote desktop connection such as RDP or VNC.
+
 ```bash
 python3 auto_energy_saving_ubuntu.py -r
-# または
+# or
 python3 auto_energy_saving_ubuntu.py --remote
 ```
-* **挙動:** リモートから操作している間、**ローカル（実機）側の画面の明るさは全く必要がないため、完全に暗く（輝度ゼロの真っ暗に）したままの状態をキープ**できます。
-* **リモート側への影響:** ローカル画面が暗いままであっても、**リモート側のPC画面（手元のクライアント表示）は明るいまま**で、通常通り何の影響もなく快適に操作を継続できます。自動画面ブランクのようにマシンがロックされてリモート接続が切れることもありません。（※結果論として、オフィスや自宅に置いている実機画面を第三者に覗き見られるのを防ぐ効果もあります）
-* **停止方法:** リモート作業を終了し、ローカル画面の消灯状態を解除したい場合も、ターミナルで **`Ctrl + C`** を押してプログラムを停止してください。
+
+* **Behavior:** While operating the computer remotely, the brightness of the local (physical) display is not needed, so the local display can remain completely dark (brightness set to zero).
+* **Effect on the remote session:** Even while the local display remains dark, the remote PC screen shown on the client side remains bright, allowing you to continue working normally. Unlike automatic screen blanking, the machine is not locked and the remote connection is not disconnected.  
+  *(As an additional benefit, this can also help prevent other people in an office or at home from viewing the physical screen.)*
+* **How to stop:** When you finish the remote session and want to restore the local display, press `Ctrl + C` in the terminal to stop the program.
 
 ---
 
-## 🔄 元の環境に戻す場合（設定の解除）
+## 🔄 Restoring the Original Environment (Undoing the Configuration)
 
-本プログラムの使用を完全に終了し、OS標準の自動電力管理プロファイルに戻したい場合は、以下のコマンドを実行してデーモンを再開します。（PCを再起動しても同じ効果が得られます。）
+If you want to completely stop using this program and return to the OS's standard automatic power-management profile, restart the daemon with the following command. (The same effect can also be achieved by rebooting the PC.)
 
 ```bash
 sudo systemctl start power-profiles-daemon.service
 ```
-* **挙動:** 停止していた標準の電力管理サービスが再起動し、CPUおよび電力の制御権がOS側に安全に引き渡されます。
 
-*(※ 作成した `/etc/tmpfiles.d/cpu-epp-permissions.conf` はそのままでも通常運用の害にはなりませんが、完全に削除したい場合は `sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf` を実行してください)*
+* **Behavior:** The previously stopped standard power-management service is restarted, and control of the CPU and power management is safely handed back to the OS.
+
+> **Note:** The created `/etc/tmpfiles.d/cpu-epp-permissions.conf` can normally be left in place without causing problems during regular operation. If you want to remove it completely, run:
+>
+> ```bash
+> sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf
+> ``
