@@ -23,7 +23,7 @@ IDLE_STAGE1_BRIGHTNESS_PERCENT = 10
 IDLE_STAGE2_SECONDS = 10 * 60
 #IDLE_STAGE2_SECONDS = 90
 IDLE_STAGE2_CPU_PROFILE = "power"
-IDLE_STAGE2_BRIGHTNESS_PERCENT = 0  # 0%指定（完全消灯）
+IDLE_STAGE2_BRIGHTNESS_PERCENT = 0  # 0%指定（完全消灯） 0 is screen off, try 1 or 400 or 12000 ...etc
 
 IS_REMOTE_MODE = "-r" in sys.argv or "--remote" in sys.argv
 
