@@ -1,4 +1,4 @@
-# Remote Work Screen Brightness & CPU Profile Sync Tool
+# Screen Brightness & CPU Profile Sync Tool
 * auto_energy_saving_ubuntu.py
 
 ## 📌 Background (Problem Solved)
