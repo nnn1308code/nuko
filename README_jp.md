@@ -34,17 +34,30 @@ EOF
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cpu-epp-permissions.conf
 ```
 
-### 3. 競合する標準デーモンを一時停止
+### 3. WIFIの自動省エネモードを無効化（接続断防止）
+WIFIの自動省エネモードを防ぐため、以下の対処が必要です。この設定は再起動後も維持されます。
+```bash
+sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf << 'EOF'
+[connection]
+# Disable Wi-Fi power saving to prevent disconnections (Default is 3)
+wifi.powersave = 2
+EOF
+
+sudo systemctl restart NetworkManager  #設定後、NetworkManagerを再起動
+```
+
+### 4. 競合する標準デーモンを一時停止
 Ubuntuなどで標準で動いている電力管理デーモン（`power-profiles-daemon`）が動作していると、本プログラムによる設定を自動で上書きして妨害してしまうため、一時的に停止します。
 ```bash
 sudo systemctl stop power-profiles-daemon.service
 ```
 
-### 4. プログラムを実行可能にする
+### 5. プログラムを実行可能にする
 スクリプトに実行権限を付与します。
 ```bash
 chmod +x auto_energy_saving_ubuntu.py
 ```
+
 
 ---
 
