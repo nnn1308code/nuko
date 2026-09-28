@@ -1,98 +1,143 @@
-# Screen Brightness & CPU Profile Sync Tool
-* auto_energy_saving_ubuntu.py
+# Screen Brightness & CPU Profile Control Tool
+* `auto_power_energy_saving_ubuntu.py`	<br>
+   It's an unnatural name, but it's a wordplay on "APES."
 
-## 📌 Background (Problem Solved)
-In Ubuntu's default settings (Settings > Power > Power Saving), if "Automatic Screen Blank" is enabled and set to "3 minutes" or "5 minutes", a problem occurs where the system is automatically locked (enters suspend state) as soon as the screen dims.
+> **TLP is not used.** This project is designed to operate without TLP.
 
-When the system is locked, **remote access is disconnected, and all external control is lost**, leading to critical operational failure.
+## 📌 Background (The Problem This Tool Solves)
 
-This program was developed to completely avoid this "unintended system lock and remote disconnection caused by automatic screen blanking."
+When Ubuntu's standard setting for automatic screen blanking (Settings > Power Management > Screen Power Saving) is enabled and configured to blank the screen after 3 or 5 minutes, the system may automatically lock or enter a suspended state when the screen turns off.
 
-### ⚙️ Technical Design Points
-* **Elimination of dependency on display servers (Wayland / X11)**
-  While conventional screen control tools often only work in either Wayland or X11 environments, this program is designed to operate normally in either environment without the user needing to be aware of the difference.
-* **Safe execution with general user privileges**
-  Writing to the CPU energy performance preference (EPP) files on Linux usually requires administrator (root) privileges. However, running the entire program with `sudo` carries the risk of corrupting the Python environment. Therefore, we have adopted a safe approach: **"Run the program itself with general user privileges and grant write permissions only to the specific CPU setting files."**
+Once the system is locked, remote access may be disconnected, making it impossible to operate the machine remotely. To avoid this problem, this program controls screen brightness and CPU EPP independently of the operating system's automatic screen blanking feature.
+
+### ⚙️ Technical Design Highlights
+
+* **Idle detection using GNOME/Mutter IdleMonitor**
+  Linux sysfs is used to control screen brightness and CPU EPP, while GNOME Mutter IdleMonitor is used to detect idle periods and user activity.
+
+* **Runs as a regular user**
+  The program itself is not started with `sudo`. Instead, write access is granted only to the CPU EPP configuration files.
+
+* **No TLP**
+  This program does not depend on TLP or auto-cpufreq.
 
 ---
 
-## 🛠️ Pre-configuration (First-time only)
+## 🛠️ Initial Setup (Required Only Once)
 
-To allow the program to be executed and applied with general user privileges, follow these steps to grant permissions and stop conflicting daemons.
+### 1. Create a dedicated group for EPP
 
-### 1. Create the permission configuration file
-Execute the following command to create a configuration file that grants write permissions (`0666`) to the CPU EPP setting files for general users.
+`chmod u+rw` does not grant permissions to the "currently logged-in user." It adds read/write permissions for the **file owner**.
+
+Since sysfs EPP files are normally owned by `root`, using `chmod u+rw` alone does not allow a regular user to write to them.
+
+Therefore, create a dedicated group so that regular users can change EPP settings.
+
+```bash
+sudo groupadd --system cpu-epp
+sudo usermod -aG cpu-epp "$USER"
+```
+
+### 2. Set permissions for the EPP configuration files
+
+The following configuration sets the owner to `root`, the group to `cpu-epp`, and the permissions to `0660`.
+
+Unlike `0666`, this does not grant write permission to every user.
+
 ```bash
 sudo tee /etc/tmpfiles.d/cpu-epp-permissions.conf <<'EOF'
-m /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference 0666 root root - -
+m /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference 0660 root cpu-epp - -
 EOF
 ```
 
-### 2. Apply settings to the system immediately
-Apply the created configuration file to the system immediately without waiting for a reboot.
+Apply the configuration immediately:
+
 ```bash
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cpu-epp-permissions.conf
 ```
 
-### 3. Disable Wi-Fi automatic power saving (Prevent disconnection)
-To prevent Wi-Fi automatic power saving mode, the following action is required. This setting persists after rebooting.
+**Important:** You must log out and log back in for the `usermod -aG` change to take effect.
+
+### 3. Disable automatic Wi-Fi power saving (to prevent connection loss)
+
+To prevent automatic Wi-Fi power saving from causing connection problems, apply the following configuration. This setting persists across reboots.
+
 ```bash
-sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf << 'EOF'
+sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf <<'EOF'
 [connection]
-# Disable Wi-Fi power saving to prevent disconnections (Default is 3)
+# Disable Wi-Fi power saving to prevent disconnections
 wifi.powersave = 2
 EOF
 
-sudo systemctl restart NetworkManager  # Restart NetworkManager after configuration
+sudo systemctl restart NetworkManager
 ```
 
-### 4. Temporarily stop conflicting standard daemons
-If the standard power management daemon (`power-profiles-daemon`) running in Ubuntu etc. is active, it may automatically overwrite and interfere with the settings made by this program. Therefore, stop it temporarily.
+### 4. Temporarily stop the conflicting standard daemon
+
+`power-profiles-daemon` may overwrite the EPP settings. Therefore, stop it while using this script.
+
 ```bash
 sudo systemctl stop power-profiles-daemon.service
 ```
 
 ### 5. Make the program executable
-Grant execution permissions to the script.
+
 ```bash
-chmod +x auto_energy_saving_ubuntu.py
+chmod +x auto_power_energy_saving_ubuntu.py
 ```
 
 ---
 
-## 🚀 How to Run and Option Behaviors
+## 🚀 Running the Program and Options
 
-Depending on the environment you are working in (operating the physical machine directly or operating via remote connection), use the options accordingly.
+### 🔹 Option A: Normal Mode (Local Mode)
 
-### 🔹 Pattern A: Normal Execution (Local Mode)
-Use this when sitting in front of the physical machine and operating it directly.
 ```bash
-python3 auto_energy_saving_ubuntu.py
+python3 auto_power_energy_saving_ubuntu.py
 ```
-* **Behavior:** After a period of inactivity, the screen will automatically dim (if minimum brightness is set to 0, it will be completely dark), and the CPU will enter power-saving mode.
-* **Recovery Behavior:** When user activity (such as keyboard or mouse operation) is detected on the physical machine, **both the screen brightness and the CPU profile will automatically return to their original state (e.g., balanced).**
-* **How to Stop:** To exit, press **`Ctrl + C`** in the terminal to stop the program.
 
-### 🔹 Pattern B: Remote Mode Execution (`-r` / `--remote`)
-Use this when working via screen sharing using RDP or VNC etc. from a remote location.
+* **Stage 1:** After 60 seconds of inactivity → CPU EPP `power`, screen brightness 10%
+* **Stage 2:** After 10 minutes of inactivity → CPU EPP `power`, screen brightness 0%
+* **Resume:** When user activity such as keyboard or mouse input is detected → CPU EPP `balance_performance`, and the screen brightness is restored to the saved value
+* **Stop:** Press `Ctrl + C`
+
+### 🔹 Option B: Remote Mode (`-r` / `--remote`)
+
 ```bash
-python3 auto_energy_saving_ubuntu.py -r
-# or
-python3 auto_energy_saving_ubuntu.py --remote
+python3 auto_power_energy_saving_ubuntu.py -r
 ```
-* **Behavior:** While operating remotely, **since the screen of the physical machine is not needed, it can be kept completely dark (brightness zero).**
-* **Impact on Remote Side:** Even if the local screen is dark, **the remote PC screen (the display on the client side) remains bright**, allowing for comfortable operation without any impact. Unlike automatic screen blanking, the machine will not lock and the remote connection will not be cut. (As a result, this also prevents third parties from peeking at the physical machine screen left in the office or home).
-* **How to Stop:** To end remote work and restore the local screen brightness, press **`Ctrl + C`** in the terminal to stop the program.
+
+or
+
+```bash
+python3 auto_power_energy_saving_ubuntu.py --remote
+```
+
+In Remote Mode, the saved local screen brightness is not restored when user activity is detected. When the remote session is finished, press `Ctrl + C` to stop the program and restore the saved brightness.
 
 ---
 
-## 🔄 Returning to Original Environment (Removing Settings)
-
-To completely stop using this program and return to the OS standard automatic power management profiles, execute the following command to restart the daemon. (Rebooting the PC has the same effect.)
+## 🔄 Restoring the Original Environment
 
 ```bash
 sudo systemctl start power-profiles-daemon.service
 ```
-* **Behavior:** The stopped standard power management service restarts, and control of the CPU and power is safely handed back to the OS.
 
-*(※ The created `/etc/tmpfiles.d/cpu-epp-permissions.conf` does not harm normal operation if left as is, but if you wish to delete it completely, run `sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf`)*
+To completely remove the permission configuration that was created:
+
+```bash
+sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf
+sudo groupdel cpu-epp
+```
+
+※ Before running `groupdel`, make sure that the `cpu-epp` group is not being used for any other purpose.
+
+---
+
+## ⚠️ Notes
+
+* This program depends on GNOME/Mutter IdleMonitor.
+* It uses a CPU EPP sysfs path and the Intel backlight path, so it may not work as-is on all hardware.
+* It does not use a configuration that grants EPP write permission to every user, such as `0666`.
+* `chmod u+rw` adds permissions for the file owner; it does not mean "grant read/write access to the current regular user."
+* This program does not suspend the system or lock the screen.

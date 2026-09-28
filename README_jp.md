@@ -1,99 +1,142 @@
-#  画面輝度・CPUプロファイル連動制御ツール
-*  auto_energy_saving_ubuntu.py
+# 画面輝度・CPUプロファイル連動制御ツール
+* auto_power_energy_saving_ubuntu.py<br>
+不自然な名前ですが APES の語呂合わせ名です。
+
+> **TLPは使用しません。** 本プロジェクトはTLPなしで動作する構成です。
 
 ## 📌 開発の背景（解決する問題）
-Ubuntuの標準設定（設定 > 電源管理 > その右側の 省電力）にある「自動画面ブランク」**を「3分」や「5分」に設定して有効化すると、画面が暗くなると同時に**システムが自動的にロック（サスペンド状態）されてしまうという問題があります。
 
-システムがロックされると、**リモートアクセスが切断され、外部からの操作が一切できなくなる**という重大な障害が発生します。
+Ubuntuの標準設定（設定 > 電源管理 > その右側の 省電力）にある「自動画面ブランク」を「3分」や「5分」に設定して有効化すると、画面が暗くなると同時にシステムが自動的にロック（サスペンド状態）されてしまうという問題があります。
 
-本プログラムは、この「自動画面ブランクによる意図しないシステムロックとリモート切断」を完全に回避するために開発されました。
+システムがロックされると、リモートアクセスが切断され、外部からの操作が一切できなくなるという問題を避けるため、本プログラムではOSの自動画面ブランクとは別に、画面輝度とCPU EPPを制御します。
 
 ### ⚙️ 技術的な設計のポイント
-* **ディスプレイサーバー（Wayland / X11）への依存を排除**
-  従来の画面制御ツールはWayland環境やX11環境のどちらか片方でしか動かない問題がありましたが、本プログラムはどちらの環境であっても意識せず、共通して正常に動作する仕様になっています。
-* **一般ユーザー権限での安全な実行**
-  LinuxでCPUの省電力プロファイル（EPP）を書き換えるには通常管理者権限（root権限）が必要ですが、プログラム全体を `sudo` で動かすとPython環境が破損するリスクがあります。そのため、**「プログラム自体は一般ユーザー権限のまま安全に動かし、CPU設定の対象ファイルにだけピンポイントで書き込み権限を付与する」**という安全なアプローチを採用しています。
+
+* **GNOME/Mutter IdleMonitor を利用したアイドル検知**
+  画面の明るさとCPU EPPの制御はLinux sysfsを利用し、アイドル／ユーザー操作の検知にはGNOME Mutter IdleMonitorを利用します。
+
+* **一般ユーザー権限での実行**
+  プログラム自体は `sudo` で起動せず、CPU EPP設定ファイルだけに限定した書き込み権限を与える構成にします。
+
+* **TLPを使用しない**
+  本プログラムはTLPやauto-cpufreqには依存しません。
 
 ---
 
 ## 🛠️ 動かす前の事前設定（初回のみ）
 
-一般ユーザー権限のままプログラムを実行・適用できるようにするため、以下の手順で権限付与と競合デーモンの停止を行います。
+### 1. EPP用の専用グループを作成
 
-### 1. 権限付与の設定ファイルを作成
-以下のコマンドを実行し、一般ユーザーからでもCPUのEPP設定ファイルを書き換えられるように権限（`0666`）を付与する設定ファイルを作成します。
+`chmod u+rw` は「現在ログインしているユーザー」に権限を与える指定ではなく、「ファイル所有者」にread/write権限を与える指定です。
+
+sysfsのEPPファイルは通常 `root` 所有なので、`chmod u+rw` だけでは一般ユーザーが書き込めません。
+
+そこで、一般ユーザーだけがEPPを変更できるように専用グループを作成します。
+
+```bash
+sudo groupadd --system cpu-epp
+sudo usermod -aG cpu-epp "$USER"
+```
+
+### 2. EPP設定ファイルの権限を設定
+
+以下の設定では、所有者を `root`、グループを `cpu-epp`、権限を `0660` にします。
+`0666` のように全ユーザーへ書き込み権限を与えません。
+
 ```bash
 sudo tee /etc/tmpfiles.d/cpu-epp-permissions.conf <<'EOF'
-m /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference 0666 root root - -
+m /sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference 0660 root cpu-epp - -
 EOF
 ```
 
-### 2. 設定を今すぐシステムに反映
-作成した設定ファイルを、再起動を待たずに今すぐシステムに適用します。
+設定を今すぐ反映します。
+
 ```bash
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/cpu-epp-permissions.conf
 ```
 
+**重要:** `usermod -aG` の反映には、いったんログアウトして再ログインする必要があります。
+
 ### 3. WIFIの自動省エネモードを無効化（接続断防止）
-WIFIの自動省エネモードを防ぐため、以下の対処が必要です。この設定は再起動後も維持されます。
+
+Wi-Fiの自動省エネモードを防ぐため、以下の対処が必要です。この設定は再起動後も維持されます。
+
 ```bash
-sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf << 'EOF'
+sudo tee /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf <<'EOF'
 [connection]
-# Disable Wi-Fi power saving to prevent disconnections (Default is 3)
+# Disable Wi-Fi power saving to prevent disconnections
 wifi.powersave = 2
 EOF
 
-sudo systemctl restart NetworkManager  #設定後、NetworkManagerを再起動
+sudo systemctl restart NetworkManager
 ```
 
 ### 4. 競合する標準デーモンを一時停止
-Ubuntuなどで標準で動いている電力管理デーモン（`power-profiles-daemon`）が動作していると、本プログラムによる設定を自動で上書きして妨害してしまうため、一時的に停止します。
+
+`power-profiles-daemon` がEPP設定を上書きする場合があるため、このスクリプトを使用する間は停止します。
+
 ```bash
 sudo systemctl stop power-profiles-daemon.service
 ```
 
 ### 5. プログラムを実行可能にする
-スクリプトに実行権限を付与します。
-```bash
-chmod +x auto_energy_saving_ubuntu.py
-```
 
+```bash
+chmod +x auto_power_energy_saving_ubuntu.py
+```
 
 ---
 
 ## 🚀 実行方法とオプションの挙動
 
-作業を行う環境（ローカルの実機を直接操作するか、リモートから接続して操作するか）に応じてオプションを使い分けます。
-
 ### 🔹 パターンA：通常実行（ローカルモード）
-実機の前に座って直接操作・実行する場合に使用します。
-```bash
-python3 auto_energy_saving_ubuntu.py
-```
-* **挙動:** 一定時間放置すると画面が自動的に暗くなり（最低輝度を0に設定している場合は真っ暗になります）、CPUも省電力モードに入ります。
-* **復帰の挙動:** 実機でキーボードやマウスなどの操作（User active）を検知すると、**画面の明るさもCPUのプロファイルも自動で元の状態（バランスなど）に復帰**します。
-* **停止方法:** 終了したい場合は、ターミナルで **`Ctrl + C`** を押してプログラムを停止してください。
 
-### 🔹 パターンB：リモートモード実行（`-r` / `--remote`）
-遠隔（リモート）からRDPやVNC などで画面共有して作業を行う場合に使用します。
 ```bash
-python3 auto_energy_saving_ubuntu.py -r
-# または
-python3 auto_energy_saving_ubuntu.py --remote
+python3 auto_power_energy_saving_ubuntu.py
 ```
-* **挙動:** リモートから操作している間、**ローカル（実機）側の画面の明るさは全く必要がないため、完全に暗く（輝度ゼロの真っ暗に）したままの状態をキープ**できます。
-* **リモート側への影響:** ローカル画面が暗いままであっても、**リモート側のPC画面（手元のクライアント表示）は明るいまま**で、通常通り何の影響もなく快適に操作を継続できます。自動画面ブランクのようにマシンがロックされてリモート接続が切れることもありません。（※結果論として、オフィスや自宅に置いている実機画面を第三者に覗き見られるのを防ぐ効果もあります）
-* **停止方法:** リモート作業を終了し、ローカル画面の消灯状態を解除したい場合も、ターミナルで **`Ctrl + C`** を押してプログラムを停止してください。
+
+* **Stage 1:** 60秒アイドル → CPU EPP `power`、画面10%
+* **Stage 2:** 10分アイドル → CPU EPP `power`、画面0%
+* **復帰:** キーボードやマウスなどのUser activeを検知 → CPU EPP `balance_performance`、画面輝度を保存値へ復元
+* **停止:** `Ctrl + C`
+
+### 🔹 パターンB：リモートモード（`-r` / `--remote`）
+
+```bash
+python3 auto_power_energy_saving_ubuntu.py -r
+```
+
+または
+
+```bash
+python3 auto_power_energy_saving_ubuntu.py --remote
+```
+
+リモートモードでは、User activeを検知してもローカル画面輝度の保存値への復元を行いません。リモート作業終了後に `Ctrl + C` で停止すると、保存していた輝度へ戻します。
 
 ---
 
-## 🔄 元の環境に戻す場合（設定の解除）
-
-本プログラムの使用を完全に終了し、OS標準の自動電力管理プロファイルに戻したい場合は、以下のコマンドを実行してデーモンを再開します。（PCを再起動しても同じ効果が得られます。）
+## 🔄 元の環境に戻す場合
 
 ```bash
 sudo systemctl start power-profiles-daemon.service
 ```
-* **挙動:** 停止していた標準の電力管理サービスが再起動し、CPUおよび電力の制御権がOS側に安全に引き渡されます。
 
-*(※ 作成した `/etc/tmpfiles.d/cpu-epp-permissions.conf` はそのままでも通常運用の害にはなりませんが、完全に削除したい場合は `sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf` を実行してください)*
+作成した権限設定を完全に削除する場合：
+
+```bash
+sudo rm /etc/tmpfiles.d/cpu-epp-permissions.conf
+sudo groupdel cpu-epp
+```
+
+※ `groupdel` の前に、そのグループを他の用途で使用していないことを確認してください。
+
+---
+
+## ⚠️ 注意
+
+* このプログラムはGNOME/Mutter IdleMonitorに依存します。
+* CPU EPPのsysfsパスとIntelバックライトのパスを使用するため、すべてのハードウェアでそのまま動作するとは限りません。
+* `0666` のように全ユーザーへEPP書き込み権限を与える設定は使用しません。
+* `chmod u+rw` はファイル所有者への権限追加であり、一般ユーザーへの権限付与を意味しません。
+* 本プログラムはサスペンドや画面ロックを実行しません。
