@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+#
 # This script was updated to auto_power_energy_saving_ubuntu.py on Sep.28.2026
+#
 import os
 import signal
 import sys
